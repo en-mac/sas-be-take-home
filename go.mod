@@ -2,7 +2,7 @@ module be-takehome-2024
 
 go 1.23.1
 
-require github.com/mattn/go-sqlite3 v1.14.23
+require modernc.org/sqlite v1.33.0
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
@@ -15,7 +15,6 @@ require (
 	modernc.org/gc/v3 v3.0.0-20240107210532-573471604cb6 // indirect
 	modernc.org/mathutil v1.6.0 // indirect
 	modernc.org/memory v1.8.0 // indirect
-	modernc.org/sqlite v1.33.0 // indirect
 	modernc.org/strutil v1.2.0 // indirect
 	modernc.org/token v1.1.0 // indirect
 )
