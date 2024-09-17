@@ -1,14 +1,17 @@
+// handlers/recommendations.go
+
 package handlers
 
 import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 
-    "be-takehome-2024/internal/database"
-    "be-takehome-2024/internal/services"
+	"be-takehome-2024/internal/database"
+	"be-takehome-2024/internal/services"
 )
 
 // RecommendationsHandler handles the /recommendations endpoint.
@@ -74,24 +77,39 @@ func RecommendationsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Retrieve subjects per author for each user
-	user1SubjectAuthorCount, err := services.GetSubjectAuthorCounts(user1AuthorKeys)
+	user1SubjectResult, err := services.GetSubjectAuthorCounts(user1AuthorKeys)
 	if err != nil {
 		http.Error(w, "Error fetching subjects for user 1.", http.StatusInternalServerError)
 		return
 	}
 
-	user2SubjectAuthorCount, err := services.GetSubjectAuthorCounts(user2AuthorKeys)
+	user2SubjectResult, err := services.GetSubjectAuthorCounts(user2AuthorKeys)
 	if err != nil {
 		http.Error(w, "Error fetching subjects for user 2.", http.StatusInternalServerError)
 		return
 	}
 
+	// Log per-author subjects for User 1
+	for author, subjects := range user1SubjectResult.PerAuthor {
+		log.Printf("User 1, Author: %s, subjects: %v", author, subjects)
+	}
+
+	// Log per-author subjects for User 2
+	for author, subjects := range user2SubjectResult.PerAuthor {
+		log.Printf("User 2, Author: %s, subjects: %v", author, subjects)
+	}
+
+	// Optional: Log aggregate subjects if needed
+	// log.Printf("User 1 aggregate subjects: %v", user1SubjectResult.Aggregate)
+	// log.Printf("User 2 aggregate subjects: %v", user2SubjectResult.Aggregate)
+
 	// Identify common subjects and select the most prominent one
-	commonSubject, err := services.FindMostCommonSubject(user1SubjectAuthorCount, user2SubjectAuthorCount)
+	commonSubject, err := services.FindMostCommonSubject(user1SubjectResult.Aggregate, user2SubjectResult.Aggregate)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotFound)
 		return
 	}
+	log.Printf("Common subject: %s", commonSubject)
 
 	// Fetch books in the common subject
 	recommendedBooks, err := services.GetRecommendedBooks(commonSubject)
@@ -102,7 +120,7 @@ func RecommendationsHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Prepare the response
 	response := map[string]interface{}{
-		"common_subject":  commonSubject,
+		// "common_subject":  commonSubject,
 		"recommendations": recommendedBooks,
 	}
 

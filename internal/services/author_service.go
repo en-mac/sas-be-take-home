@@ -91,6 +91,8 @@ func ResolveAuthorKeys(authors []string) ([]models.Author, error) {
 			// Safely append to the authorKeys slice
 			mu.Lock()
 			authorKeys = append(authorKeys, selectedAuthor)
+			log.Printf("Author '%s' retrieved with WorkCount: %d", selectedAuthor.Name, selectedAuthor.WorkCount)
+
 			mu.Unlock()
 		}()
 	}
