@@ -58,7 +58,7 @@ func GetRecommendedBooks(subject string) ([]models.Work, error) {
 		recentBooks    []models.Work
 		mu             sync.Mutex
 		wg             sync.WaitGroup
-		concurrency    = 200 // Limit the number of concurrent goroutines for fetching descriptions
+		concurrency    = 3 // Limit the number of concurrent goroutines for fetching descriptions
 		sem            = make(chan struct{}, concurrency)
 		booksToProcess []struct {
 			Work struct {
@@ -140,12 +140,9 @@ func GetRecommendedBooks(subject string) ([]models.Work, error) {
 			defer func() { <-sem }() // Release the semaphore slot
 
 			// Prepare authors list
-			var authors []models.Author
+			var authors []string
 			for _, a := range book.Work.Authors {
-				authors = append(authors, models.Author{
-					Name: a.Name,
-					Key:  a.Key,
-				})
+				authors = append(authors, a.Name)
 			}
 
 			// Fetch description if available
@@ -186,8 +183,14 @@ func GetRecommendedBooks(subject string) ([]models.Work, error) {
 				Authors:          authors,
 				Description:      description,
 				FirstPublishYear: book.Work.FirstPublishYear,
+				PublishDate:      "", // Default to an empty string if no publish date exists
 			}
-
+			
+			// Only assign PublishDate if the slice is not empty
+			if len(book.Work.PublishDate) > 0 {
+				recentBook.PublishDate = book.Work.PublishDate[0] // Safely access the first publish date
+			}
+			
 			// Safely append to the recentBooks slice
 			mu.Lock()
 			recentBooks = append(recentBooks, recentBook)

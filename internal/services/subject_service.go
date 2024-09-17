@@ -1,3 +1,5 @@
+// services/subject_service.go
+
 package services
 
 import (
@@ -6,20 +8,27 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"sort"
 	"strings"
 	"sync"
+	"sort"
 
-    "be-takehome-2024/internal/models"
+	"be-takehome-2024/internal/models"
 )
 
+// SubjectAuthorResult holds both aggregate subject counts and per-author subjects.
+type SubjectAuthorResult struct {
+	Aggregate   map[string]int              // Aggregate subject counts across all authors
+	PerAuthor   map[string][]string         // Subjects per individual author
+}
+
 // GetSubjectAuthorCounts retrieves subjects per author and counts how many authors have written in each subject concurrently.
-func GetSubjectAuthorCounts(authors []models.Author) (map[string]int, error) {
+func GetSubjectAuthorCounts(authors []models.Author) (SubjectAuthorResult, error) {
 	subjectAuthorCount := make(map[string]int)
+	perAuthorSubjects := make(map[string][]string)
 	var (
 		wg          sync.WaitGroup
 		mu          sync.Mutex
-		concurrency = 200 // Limit the number of concurrent goroutines
+		concurrency = 10 // Limit the number of concurrent goroutines
 		sem         = make(chan struct{}, concurrency)
 	)
 
@@ -62,27 +71,35 @@ func GetSubjectAuthorCounts(authors []models.Author) (map[string]int, error) {
 
 			// Collect unique subjects for the author
 			subjectsSet := make(map[string]struct{})
-			for _, work := range worksResult.Entries {
+			for i, work := range worksResult.Entries {
+				// Log the author's name and the work number
+				log.Printf("Author: %s, Work %d: %+v", author.Name, i+1, work)
 				for _, subject := range work.Subjects {
 					normalizedSubject := strings.ToLower(strings.TrimSpace(subject))
 					subjectsSet[normalizedSubject] = struct{}{}
 				}
 			}
 
-			// Safely update the subjectAuthorCount map
+			// Safely update the maps
 			mu.Lock()
+			defer mu.Unlock()
 			for subject := range subjectsSet {
 				subjectAuthorCount[subject]++
+				perAuthorSubjects[author.Name] = append(perAuthorSubjects[author.Name], subject)
 			}
-			mu.Unlock()
 		}(author)
 	}
 
 	// Wait for all goroutines to finish
 	wg.Wait()
 
-	return subjectAuthorCount, nil
+	return SubjectAuthorResult{
+		Aggregate: subjectAuthorCount,
+		PerAuthor: perAuthorSubjects,
+	}, nil
 }
+
+
 
 // FindMostCommonSubject identifies common subjects between two users and selects the most prominent one.
 func FindMostCommonSubject(user1Subjects, user2Subjects map[string]int) (string, error) {

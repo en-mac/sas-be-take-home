@@ -29,12 +29,19 @@ func SetupDatabase() {
 	statement.Exec()
 
 	// Insert sample users
+	log.Println("Inserting sample users...")
 	statement, _ = database.Prepare(`
 		INSERT INTO users(username, fauthors) VALUES (?, ?)
 	`)
 	statement.Exec("Sandra", "Andy Weir; Brandon Sanderson; Arthur C. Clarke; Ursula K. Le Guin; H.G. Wells")
 	statement.Exec("JDoe", "George R. R. Martin; Robert Jordan; Neil Gaiman; Robin Hobb; Steven Erikson")
 	statement.Exec("NonFicFan3", "Patrick Radden Keefe; Jon Krakauer; David Grann; Charles Montgomery; Jeff Speck")
+	statement.Exec("FictionFan123", "J.K. Rowling; Stephen King; Margaret Atwood; Octavia E. Butler; Jane Austen")
+	statement.Exec("EuropeanLiteratureLover", "Fyodor Dostoevsky; Leo Tolstoy; Franz Kafka; Albert Camus; Marcel Proust")
+	statement.Exec("EdgeCase1", "Andy Weir; Brandon Sanderson; Arthur C. Clarke; Ursula K. Le Guin")
+	statement.Exec("EdgeCase2", "Andy Weir; Brandon Sanderson; Arthur C. Clarke")
+	statement.Exec("EdgeCase3", "Andy Weir; Brandon Sanderson")
+	statement.Exec("EdgeCase4", "Andy Weird")
 }
 
 // GetUserFavoriteAuthors retrieves up to five favorite authors for a given user ID.
@@ -57,5 +64,6 @@ func GetUserFavoriteAuthors(db *sql.DB, userID int) ([]string, error) {
 		}
 		trimmedAuthors = append(trimmedAuthors, strings.TrimSpace(author))
 	}
+	log.Printf("Favorite authors for user ID %d: %v", userID, trimmedAuthors)
 	return trimmedAuthors, nil
 }
