@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -19,6 +20,12 @@ type Author struct {
 	Name      string
 	Key       string
 	WorkCount int
+}
+
+// Work represents a work retrieved from the Open Library API.
+type Work struct {
+	Title    string   `json:"title"`
+	Subjects []string `json:"subjects"`
 }
 
 func main() {
@@ -55,7 +62,7 @@ func setupDatabase() {
 	statement, _ = database.Prepare(`
 		INSERT INTO users(username, fauthors) VALUES (?, ?)
 	`)
-	statement.Exec("Sandra", "Andy Weir; Brandon Sanderson; Arthur Clarke; Ursula Le Guin; H.G. Wells")
+	statement.Exec("Sandra", "Andy Weir; Brandon Sanderson; Arthur C. Clarke; Ursula K. Le Guin; H.G. Wells")
 	statement.Exec("JDoe", "George R. R. Martin; Robert Jordan; Neil Gaiman; Robin Hobb; Steven Erikson")
 	statement.Exec("NonFicFan3", "Patrick Radden Keefe; Jon Krakauer; David Grann; Charles Montgomery; Jeff Speck")
 }
@@ -122,10 +129,29 @@ func recommendationsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Retrieve subjects per author for each user
+	user1SubjectAuthorCount, err := getSubjectAuthorCounts(user1AuthorKeys)
+	if err != nil {
+		http.Error(w, "Error fetching subjects for user 1.", http.StatusInternalServerError)
+		return
+	}
+
+	user2SubjectAuthorCount, err := getSubjectAuthorCounts(user2AuthorKeys)
+	if err != nil {
+		http.Error(w, "Error fetching subjects for user 2.", http.StatusInternalServerError)
+		return
+	}
+
+	// Identify common subjects and select the most prominent one
+	commonSubject, err := findMostCommonSubject(user1SubjectAuthorCount, user2SubjectAuthorCount)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
 	// Prepare the response
 	response := map[string]interface{}{
-		"user1_authors": user1AuthorKeys,
-		"user2_authors": user2AuthorKeys,
+		"common_subject": commonSubject,
 	}
 
 	// Send the JSON response
@@ -207,9 +233,11 @@ func resolveAuthorKeys(authors []string) ([]Author, error) {
 		for _, doc := range result.Docs {
 			if doc.WorkCount > maxWorkCount {
 				maxWorkCount = doc.WorkCount
+				// Ensure the key does not include leading slashes
+				key := strings.TrimPrefix(doc.Key, "/authors/")
 				selectedAuthor = Author{
 					Name:      doc.Name,
-					Key:       doc.Key,
+					Key:       key,
 					WorkCount: doc.WorkCount,
 				}
 			}
@@ -219,4 +247,89 @@ func resolveAuthorKeys(authors []string) ([]Author, error) {
 	}
 
 	return authorKeys, nil
+}
+
+// getSubjectAuthorCounts retrieves subjects per author and counts how many authors have written in each subject.
+func getSubjectAuthorCounts(authors []Author) (map[string]int, error) {
+	subjectAuthorCount := make(map[string]int)
+
+	for _, author := range authors {
+		// Fetch works for the author
+		worksURL := fmt.Sprintf("https://openlibrary.org/authors/%s/works.json?limit=100", author.Key)
+
+		resp, err := http.Get(worksURL)
+		if err != nil {
+			log.Printf("Error fetching works for author '%s': %v", author.Name, err)
+			continue
+		}
+		defer resp.Body.Close()
+
+		body, err := ioutil.ReadAll(resp.Body)
+		if err != nil {
+			log.Printf("Error reading works response for author '%s': %v", author.Name, err)
+			continue
+		}
+
+		// Parse the JSON response
+		var worksResult struct {
+			Entries []struct {
+				Title    string   `json:"title"`
+				Subjects []string `json:"subjects"`
+			} `json:"entries"`
+		}
+
+		if err := json.Unmarshal(body, &worksResult); err != nil {
+			log.Printf("Error parsing works JSON for author '%s': %v", author.Name, err)
+			continue
+		}
+
+		// Collect unique subjects for the author
+		subjectsSet := make(map[string]struct{})
+		for _, work := range worksResult.Entries {
+			for _, subject := range work.Subjects {
+				normalizedSubject := strings.ToLower(strings.TrimSpace(subject))
+				subjectsSet[normalizedSubject] = struct{}{}
+			}
+		}
+
+		// Increment the subject count for each unique subject
+		for subject := range subjectsSet {
+			subjectAuthorCount[subject]++
+		}
+	}
+
+	return subjectAuthorCount, nil
+}
+
+// findMostCommonSubject identifies common subjects between two users and selects the most prominent one.
+func findMostCommonSubject(user1Subjects, user2Subjects map[string]int) (string, error) {
+	commonSubjects := make(map[string]int)
+
+	// Find common subjects and sum the number of authors
+	for subject, count1 := range user1Subjects {
+		if count2, exists := user2Subjects[subject]; exists {
+			commonSubjects[subject] = count1 + count2
+		}
+	}
+
+	if len(commonSubjects) == 0 {
+		return "", fmt.Errorf("No common subjects found between the users.")
+	}
+
+	// Sort the common subjects by total author count in descending order
+	type subjectCount struct {
+		Subject string
+		Count   int
+	}
+	var subjectCounts []subjectCount
+	for subject, count := range commonSubjects {
+		subjectCounts = append(subjectCounts, subjectCount{Subject: subject, Count: count})
+	}
+
+	sort.Slice(subjectCounts, func(i, j int) bool {
+		return subjectCounts[i].Count > subjectCounts[j].Count
+	})
+
+	// Return the most prominent common subject
+	return subjectCounts[0].Subject, nil
 }
