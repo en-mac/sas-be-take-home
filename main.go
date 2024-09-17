@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	_ "github.com/mattn/go-sqlite3" // SQLite driver
 )
@@ -24,8 +25,10 @@ type Author struct {
 
 // Work represents a work retrieved from the Open Library API.
 type Work struct {
-	Title    string   `json:"title"`
-	Subjects []string `json:"subjects"`
+	Title           string   `json:"title"`
+	Authors         []Author `json:"authors"`
+	Description     string   `json:"description"`
+	FirstPublishYear int      `json:"first_publish_year"`
 }
 
 func main() {
@@ -149,9 +152,17 @@ func recommendationsHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Fetch books in the common subject
+	recommendedBooks, err := getRecommendedBooks(commonSubject)
+	if err != nil {
+		http.Error(w, "Error fetching recommended books.", http.StatusInternalServerError)
+		return
+	}
+
 	// Prepare the response
 	response := map[string]interface{}{
-		"common_subject": commonSubject,
+		"common_subject":   commonSubject,
+		"recommendations": recommendedBooks,
 	}
 
 	// Send the JSON response
@@ -332,4 +343,133 @@ func findMostCommonSubject(user1Subjects, user2Subjects map[string]int) (string,
 
 	// Return the most prominent common subject
 	return subjectCounts[0].Subject, nil
+}
+
+// getRecommendedBooks fetches books in the common subject and returns the top three recent books.
+func getRecommendedBooks(subject string) ([]Work, error) {
+    // Corrected sorting parameter to 'new'
+    subjectURL := fmt.Sprintf("https://openlibrary.org/subjects/%s.json?limit=50&sort=new", strings.ReplaceAll(subject, " ", "_"))
+
+    resp, err := http.Get(subjectURL)
+    if err != nil {
+        return nil, fmt.Errorf("Error fetching books for subject '%s': %v", subject, err)
+    }
+    defer resp.Body.Close()
+
+    body, err := ioutil.ReadAll(resp.Body)
+    if err != nil {
+        return nil, fmt.Errorf("Error reading books response for subject '%s': %v", subject, err)
+    }
+
+    // Parse the JSON response
+    var subjectResult struct {
+        Works []struct {
+            Title            string `json:"title"`
+            Authors          []struct {
+                Name string `json:"name"`
+                Key  string `json:"key"`
+            } `json:"authors"`
+            EditionCount     int      `json:"edition_count"`
+            FirstPublishYear int      `json:"first_publish_year"`
+            Key              string   `json:"key"`
+            CoverID          int      `json:"cover_id"`
+            PublishDate      []string `json:"publish_date"`
+        } `json:"works"`
+    }
+
+    if err := json.Unmarshal(body, &subjectResult); err != nil {
+        return nil, fmt.Errorf("Error parsing books JSON for subject '%s': %v", subject, err)
+    }
+
+    // Filter books published in the last 2 years
+    currentDate := time.Now()
+    twoYearsAgo := currentDate.AddDate(-2, 0, 0)
+
+    var recentBooks []Work
+    for _, work := range subjectResult.Works {
+        var publishDate time.Time
+        // Try to parse the most recent publish date
+        for _, dateStr := range work.PublishDate {
+            parsedDate, err := time.Parse("2006", dateStr)
+            if err != nil {
+                parsedDate, err = time.Parse("January 2, 2006", dateStr)
+            }
+            if err != nil {
+                parsedDate, err = time.Parse("2006-01-02", dateStr)
+            }
+            if err == nil {
+                if publishDate.IsZero() || parsedDate.After(publishDate) {
+                    publishDate = parsedDate
+                }
+            }
+        }
+
+        // If publishDate is zero, fall back to FirstPublishYear
+        if publishDate.IsZero() && work.FirstPublishYear != 0 {
+            publishDate = time.Date(work.FirstPublishYear, 1, 1, 0, 0, 0, 0, time.UTC)
+        }
+
+        if publishDate.IsZero() {
+            continue
+        }
+
+        if publishDate.After(twoYearsAgo) || publishDate.Equal(twoYearsAgo) {
+            // Prepare authors list
+            var authors []Author
+            for _, a := range work.Authors {
+                authors = append(authors, Author{
+                    Name: a.Name,
+                    Key:  a.Key,
+                })
+            }
+
+            // Fetch description if available
+            description := ""
+            workKey := strings.TrimPrefix(work.Key, "/works/")
+            descURL := fmt.Sprintf("https://openlibrary.org/works/%s.json", workKey)
+            descResp, err := http.Get(descURL)
+            if err == nil {
+                defer descResp.Body.Close()
+                descBody, err := ioutil.ReadAll(descResp.Body)
+                if err == nil {
+                    var descResult struct {
+                        Description interface{} `json:"description"`
+                    }
+                    if err := json.Unmarshal(descBody, &descResult); err == nil {
+                        switch v := descResult.Description.(type) {
+                        case string:
+                            description = v
+                        case map[string]interface{}:
+                            if val, ok := v["value"].(string); ok {
+                                description = val
+                            }
+                        }
+                    }
+                }
+            }
+
+            recentBooks = append(recentBooks, Work{
+                Title:            work.Title,
+                Authors:          authors,
+                Description:      description,
+                FirstPublishYear: publishDate.Year(),
+            })
+        }
+    }
+
+    if len(recentBooks) == 0 {
+        return nil, fmt.Errorf("No recent books found for subject '%s'.", subject)
+    }
+
+    // Sort the books by publication date in descending order
+    sort.Slice(recentBooks, func(i, j int) bool {
+        return recentBooks[i].FirstPublishYear > recentBooks[j].FirstPublishYear
+    })
+
+    // Select the top three books
+    if len(recentBooks) > 3 {
+        recentBooks = recentBooks[:3]
+    }
+
+    return recentBooks, nil
 }
