@@ -1,8 +1,18 @@
 # Notes
 
 ## Assumptions/ Future Improvements:
-- Right now the setupDatabase function first deletes the database if it exists and then creates a new one. In production, we would likely have a database running persistently either in its own container or as a managed service.
 - Right now a user_id is just a number related to its position in the database. We could do it using username instead of user_id.
-- All logs are currently using standard "log" package. In production, we may want to use structured logging so that we could easily search and filter logs like INFO, DEBUG, or ERROR.
-- We could add caching as needed using Redis to reduce the number of requests to the Open Library API. We might want to do this for the reccomended books since the published books for a given genre are unlikely to change frequently.
-- The goroutines are set maximally to 10 Authors at once, 200 books at once, and 3 descriptions at once.
+- All logs are currently using standard "log" package and are streamed to backend-logs.db. In production, we may want to use structured logging so that we could easily search and filter logs like INFO, DEBUG, or ERROR. We could stream these logs to a log aggregator like ELK stack or AWS CloudWatch.
+- Right now the setupDatabase function first deletes the database if it exists and then creates a new one. In production, we would likely have a database running persistently either in its own container or as a managed service. 
+
+- I am using English as the default language for the Open Library API for Authors and the Titles of their Works. 
+- I am using local caching to reduce time by eliminating duplicate API calls. I am using "go-cache" for this purpose. In production, we could use Redis for caching.
+- Then we can see if we need to use machine learning to find a more accurate 'best recommendation' for the users.
+
+- maybe we need to return only books that contain a subject?
+
+# TODO:
+- stream logs to a new backend-logs.db file
+- resolve for english. then add support for other languages
+- implement local caching
+- machine learning over subjects
