@@ -18,14 +18,17 @@ import (
 
 // SubjectAuthorResult holds both aggregate subject counts and per-author subjects.
 type SubjectAuthorResult struct {
-	Aggregate map[string]int      // Aggregate subject counts across all authors
-	PerAuthor map[string][]string // Subjects per individual author
+	Aggregate  map[string]int      // Aggregate subject counts across all authors
+	PerAuthor  map[string][]string // Subjects per individual author
+	ProcessedW map[string]struct{} // Set of processed work IDs
 }
 
 // GetSubjectAuthorCounts retrieves subjects per author and counts how many authors have written in each subject concurrently.
+// It ensures that each work is processed only once using work IDs.
 func GetSubjectAuthorCounts(ctx context.Context, authors []models.Author) (SubjectAuthorResult, error) {
 	subjectAuthorCount := make(map[string]int)
 	perAuthorSubjects := make(map[string][]string)
+	processedWorks := make(map[string]struct{}) // To track processed work IDs
 
 	var (
 		wg          sync.WaitGroup
@@ -81,6 +84,7 @@ func GetSubjectAuthorCounts(ctx context.Context, authors []models.Author) (Subje
 				Entries []struct {
 					Title    string   `json:"title"`
 					Subjects []string `json:"subjects"`
+					Key      string   `json:"key"` // Work ID
 				} `json:"entries"`
 			}
 			if err := json.Unmarshal(body, &worksResult); err != nil {
@@ -89,18 +93,31 @@ func GetSubjectAuthorCounts(ctx context.Context, authors []models.Author) (Subje
 				return
 			}
 
-			// Collect unique subjects for the author
+			// Collect unique subjects for the author, ensuring unique works
 			subjectsSet := make(map[string]struct{})
 			for i, work := range worksResult.Entries {
 				// Log the author's name and the work number
-				log.Printf("Author: %s, Work %d: %+v", author.Name, i+1, work)
+				log.Printf("Author: %s, Work %d: %s", author.Name, i+1, work.Title)
+
+				// Check if the work has already been processed
+				mu.Lock()
+				if _, exists := processedWorks[work.Key]; exists {
+					// Work already processed, skip to avoid duplicates
+					mu.Unlock()
+					log.Printf("Skipping duplicate work '%s' for author '%s'", work.Title, author.Name)
+					continue
+				}
+				// Mark the work as processed
+				processedWorks[work.Key] = struct{}{}
+				mu.Unlock()
+
 				for _, subject := range work.Subjects {
 					normalizedSubject := strings.ToLower(strings.TrimSpace(subject))
 					subjectsSet[normalizedSubject] = struct{}{}
 				}
 			}
 
-			// Safely update the maps
+			// Safely update the aggregate and per-author subject counts
 			mu.Lock()
 			for subject := range subjectsSet {
 				subjectAuthorCount[subject]++
@@ -124,41 +141,41 @@ func GetSubjectAuthorCounts(ctx context.Context, authors []models.Author) (Subje
 	}
 
 	return SubjectAuthorResult{
-		Aggregate: subjectAuthorCount,
-		PerAuthor: perAuthorSubjects,
+		Aggregate:  subjectAuthorCount,
+		PerAuthor:  perAuthorSubjects,
+		ProcessedW: processedWorks,
 	}, nil
 }
 
 // FindMostCommonSubject identifies common subjects between two users and selects the most prominent one.
 func FindMostCommonSubject(user1Subjects, user2Subjects map[string]int) (string, error) {
-    commonSubjects := make(map[string]int)
+	commonSubjects := make(map[string]int)
 
-    // Find common subjects and sum the number of authors
-    for subject, count1 := range user1Subjects {
-        if count2, exists := user2Subjects[subject]; exists {
-            commonSubjects[subject] = count1 + count2
-        }
-    }
+	// Find common subjects and sum the number of authors
+	for subject, count1 := range user1Subjects {
+		if count2, exists := user2Subjects[subject]; exists {
+			commonSubjects[subject] = count1 + count2
+		}
+	}
 
-    if len(commonSubjects) == 0 {
-        return "", fmt.Errorf("No common subjects found between the users")
-    }
+	if len(commonSubjects) == 0 {
+		return "", fmt.Errorf("No common subjects found between the users")
+	}
 
-    // Sort the common subjects by total author count in descending order
-    type subjectCount struct {
-        Subject string
-        Count   int
-    }
-    var subjectCounts []subjectCount
-    for subject, count := range commonSubjects {
-        subjectCounts = append(subjectCounts, subjectCount{Subject: subject, Count: count})
-    }
+	// Sort the common subjects by total author count in descending order
+	type subjectCount struct {
+		Subject string
+		Count   int
+	}
+	var subjectCounts []subjectCount
+	for subject, count := range commonSubjects {
+		subjectCounts = append(subjectCounts, subjectCount{Subject: subject, Count: count})
+	}
 
-    sort.Slice(subjectCounts, func(i, j int) bool {
-        return subjectCounts[i].Count > subjectCounts[j].Count
-    })
+	sort.Slice(subjectCounts, func(i, j int) bool {
+		return subjectCounts[i].Count > subjectCounts[j].Count
+	})
 
-    // Return the most prominent common subject
-    return subjectCounts[0].Subject, nil
+	// Return the most prominent common subject
+	return subjectCounts[0].Subject, nil
 }
-

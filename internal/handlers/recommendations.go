@@ -56,63 +56,76 @@ func RecommendationsHandler(w http.ResponseWriter, r *http.Request) {
     resultsCh := make(chan subjectResult, 2)
 
     // Fetch subjects for both users concurrently
-    go func() {
-        // Fetch favorite authors for user1
-        user1Authors, err := database.GetUserFavoriteAuthors(db, user1ID)
-        if err != nil {
-            resultsCh <- subjectResult{nil, fmt.Errorf("User1: %v", err)}
-            return
-        }
-        if len(user1Authors) == 0 {
-            resultsCh <- subjectResult{nil, fmt.Errorf("No favorite authors found for user ID %d.", user1ID)}
-            return
-        }
-
-        // Resolve author keys for user1
-        user1AuthorKeys, err := services.ResolveAuthorKeys(ctx, user1Authors)
-        if err != nil {
-            resultsCh <- subjectResult{nil, fmt.Errorf("User1: %v", err)}
-            return
-        }
-
-        // Get subject counts for user1
-        user1SubjectResult, err := services.GetSubjectAuthorCounts(ctx, user1AuthorKeys)
-        if err != nil {
-            resultsCh <- subjectResult{nil, fmt.Errorf("User1: %v", err)}
-            return
-        }
-
-        resultsCh <- subjectResult{user1SubjectResult.Aggregate, nil}
-    }()
-
-    go func() {
-        // Fetch favorite authors for user2
-        user2Authors, err := database.GetUserFavoriteAuthors(db, user2ID)
-        if err != nil {
-            resultsCh <- subjectResult{nil, fmt.Errorf("User2: %v", err)}
-            return
-        }
-        if len(user2Authors) == 0 {
-            resultsCh <- subjectResult{nil, fmt.Errorf("No favorite authors found for user ID %d.", user2ID)}
-            return
-        }
-
-        // Resolve author keys for user2
-        user2AuthorKeys, err := services.ResolveAuthorKeys(ctx, user2Authors)
-        if err != nil {
-            resultsCh <- subjectResult{nil, fmt.Errorf("User2: %v", err)}
-            return
-        }
-
-        // Get subject counts for user2
-        user2SubjectResult, err := services.GetSubjectAuthorCounts(ctx, user2AuthorKeys)
-        if err != nil {
-            resultsCh <- subjectResult{nil, fmt.Errorf("User2: %v", err)}
-            return
-        }
-
-        resultsCh <- subjectResult{user2SubjectResult.Aggregate, nil}
-    }()
+	go func() {
+		// Fetch favorite authors for user1
+		user1Authors, err := database.GetUserFavoriteAuthors(db, user1ID)
+		if err != nil {
+			resultsCh <- subjectResult{nil, fmt.Errorf("User1: %v", err)}
+			return
+		}
+		if len(user1Authors) == 0 {
+			resultsCh <- subjectResult{nil, fmt.Errorf("No favorite authors found for user ID %d.", user1ID)}
+			return
+		}
+	
+		log.Printf("User1 authors: %v", user1Authors)
+	
+		// Resolve author keys for user1
+		user1AuthorKeys, err := services.ResolveAuthorKeys(ctx, user1Authors)
+		if err != nil {
+			resultsCh <- subjectResult{nil, fmt.Errorf("User1: %v", err)}
+			return
+		}
+	
+		log.Printf("User1 author keys: %v", user1AuthorKeys)
+	
+		// Get subject counts for user1
+		user1SubjectResult, err := services.GetSubjectAuthorCounts(ctx, user1AuthorKeys)
+		if err != nil {
+			resultsCh <- subjectResult{nil, fmt.Errorf("User1: %v", err)}
+			return
+		}
+	
+		log.Printf("User1 subject counts: %v", user1SubjectResult.Aggregate)
+	
+		resultsCh <- subjectResult{user1SubjectResult.Aggregate, nil}
+	}()
+	
+	go func() {
+		// Fetch favorite authors for user2
+		user2Authors, err := database.GetUserFavoriteAuthors(db, user2ID)
+		if err != nil {
+			resultsCh <- subjectResult{nil, fmt.Errorf("User2: %v", err)}
+			return
+		}
+		if len(user2Authors) == 0 {
+			resultsCh <- subjectResult{nil, fmt.Errorf("No favorite authors found for user ID %d.", user2ID)}
+			return
+		}
+	
+		log.Printf("User2 authors: %v", user2Authors)
+	
+		// Resolve author keys for user2
+		user2AuthorKeys, err := services.ResolveAuthorKeys(ctx, user2Authors)
+		if err != nil {
+			resultsCh <- subjectResult{nil, fmt.Errorf("User2: %v", err)}
+			return
+		}
+	
+		log.Printf("User2 author keys: %v", user2AuthorKeys)
+	
+		// Get subject counts for user2
+		user2SubjectResult, err := services.GetSubjectAuthorCounts(ctx, user2AuthorKeys)
+		if err != nil {
+			resultsCh <- subjectResult{nil, fmt.Errorf("User2: %v", err)}
+			return
+		}
+	
+		log.Printf("User2 subject counts: %v", user2SubjectResult.Aggregate)
+	
+		resultsCh <- subjectResult{user2SubjectResult.Aggregate, nil}
+	}()
+	
 
     // Collect results
     var user1Subjects, user2Subjects map[string]int
@@ -151,7 +164,7 @@ func RecommendationsHandler(w http.ResponseWriter, r *http.Request) {
 
     // Prepare the response
     response := map[string]interface{}{
-        "common_subject":  commonSubject,
+        // "common_subject":  commonSubject,
         "recommendations": recommendedBooks,
     }
 
