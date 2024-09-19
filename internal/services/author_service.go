@@ -1,5 +1,3 @@
-// internal/services/author_service.go
-
 package services
 
 import (
@@ -113,7 +111,6 @@ func ResolveAuthorKeys(ctx context.Context, authors []string) ([]models.Author, 
 			mu.Lock()
 			authorKeys = append(authorKeys, selectedAuthor)
 			mu.Unlock()
-			log.Printf("Author '%s' retrieved with WorkCount: %d", selectedAuthor.Name, selectedAuthor.WorkCount)
 		}()
 	}
 

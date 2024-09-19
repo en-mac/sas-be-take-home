@@ -67,6 +67,5 @@ func GetUserFavoriteAuthors(db *sql.DB, userID int) ([]string, error) {
 		}
 		trimmedAuthors = append(trimmedAuthors, strings.TrimSpace(author))
 	}
-	log.Printf("Favorite authors for user ID %d: %v", userID, trimmedAuthors)
 	return trimmedAuthors, nil
 }

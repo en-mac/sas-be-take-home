@@ -1,5 +1,3 @@
-// internal/services/subject_service.go
-
 package services
 
 import (
@@ -97,7 +95,7 @@ func GetSubjectAuthorCounts(ctx context.Context, authors []models.Author) (Subje
 			subjectsSet := make(map[string]struct{})
 			for i, work := range worksResult.Entries {
 				// Log the author's name and the work number
-				log.Printf("Author: %s, Work %d: %s", author.Name, i+1, work.Title)
+				log.Printf("Author: %s, Work %d: %s, Subject: %s", author.Name, i+1, work.Title, work.Subjects)
 
 				for _, subject := range work.Subjects {
 					normalizedSubject := strings.ToLower(strings.TrimSpace(subject))

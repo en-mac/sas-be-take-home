@@ -1,5 +1,3 @@
-// internal/handlers/recommendations.go
-
 package handlers
 
 import (
@@ -77,7 +75,9 @@ func RecommendationsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	
-		log.Printf("User1 author keys: %v", user1AuthorKeys)
+		for _, author := range user1AuthorKeys {
+			log.Printf("User1 author: Name=%s, Key=%s, WorkCount=%d", author.Name, author.Key, author.WorkCount)
+		}
 	
 		// Get subject counts for user1
 		user1SubjectResult, err := services.GetSubjectAuthorCounts(ctx, user1AuthorKeys)
@@ -85,9 +85,7 @@ func RecommendationsHandler(w http.ResponseWriter, r *http.Request) {
 			resultsCh <- subjectResult{nil, fmt.Errorf("User1: %v", err)}
 			return
 		}
-	
-		log.Printf("User1 subject counts: %v", user1SubjectResult.Aggregate)
-	
+		
 		resultsCh <- subjectResult{user1SubjectResult.Aggregate, nil}
 	}()
 	
@@ -112,7 +110,9 @@ func RecommendationsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	
-		log.Printf("User2 author keys: %v", user2AuthorKeys)
+		for _, author := range user2AuthorKeys {
+			log.Printf("User2 author: Name=%s, Key=%s, WorkCount=%d", author.Name, author.Key, author.WorkCount)
+		}
 	
 		// Get subject counts for user2
 		user2SubjectResult, err := services.GetSubjectAuthorCounts(ctx, user2AuthorKeys)
@@ -120,9 +120,7 @@ func RecommendationsHandler(w http.ResponseWriter, r *http.Request) {
 			resultsCh <- subjectResult{nil, fmt.Errorf("User2: %v", err)}
 			return
 		}
-	
-		log.Printf("User2 subject counts: %v", user2SubjectResult.Aggregate)
-	
+		
 		resultsCh <- subjectResult{user2SubjectResult.Aggregate, nil}
 	}()
 	
