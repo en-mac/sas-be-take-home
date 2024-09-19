@@ -1,219 +1,248 @@
+// internal/services/book_service.go
+
 package services
 
 import (
-	"encoding/json"
-	"fmt"
-	"io/ioutil"
-	"log"
-	"net/http"
-	"sort"
-	"strings"
-	"sync"
-	"time"
+    "context"
+    "encoding/json"
+    "fmt"
+    "io/ioutil"
+    "log"
+    "net/http"
+    "regexp"
+    "sort"
+    "strconv"
+    "strings"
+    "sync"
+    "time"
 
-	"be-takehome-2024/internal/models"
+    "be-takehome-2024/internal/models"
 )
 
-// GetRecommendedBooks fetches books in the common subject and returns the top three recent books with descriptions fetched concurrently.
-func GetRecommendedBooks(subject string) ([]models.Work, error) {
-	// Fetch books for the subject
-	subjectURL := fmt.Sprintf("https://openlibrary.org/subjects/%s.json?limit=50&sort=new", strings.ReplaceAll(subject, " ", "_"))
+type bookJob struct {
+    Title            string
+    Authors          []string
+    FirstPublishYear int
+    PublishDate      string
+    Key              string
+}
 
-	resp, err := http.Get(subjectURL)
-	if err != nil {
-		return nil, fmt.Errorf("Error fetching books for subject '%s': %v", subject, err)
-	}
-	// Ensure the response body is closed promptly
-	body, err := ioutil.ReadAll(resp.Body)
-	resp.Body.Close()
-	if err != nil {
-		return nil, fmt.Errorf("Error reading books response for subject '%s': %v", subject, err)
-	}
+// parseYear attempts to extract a four-digit year from a publish date string.
+// Returns 0 if no valid year is found.
+func parseYear(publishDate string) int {
+    // Regular expression to find a four-digit year between 1000 and 2999
+    re := regexp.MustCompile(`\b(1[0-9]{3}|2[0-9]{3})\b`)
+    match := re.FindString(publishDate)
+    if match == "" {
+        return 0
+    }
+    year, err := strconv.Atoi(match)
+    if err != nil {
+        return 0
+    }
+    return year
+}
 
-	// Parse the JSON response
-	var subjectResult struct {
-		Works []struct {
-			Title            string   `json:"title"`
-			Authors          []struct {
-				Name string `json:"name"`
-				Key  string `json:"key"`
-			} `json:"authors"`
-			EditionCount     int      `json:"edition_count"`
-			FirstPublishYear int      `json:"first_publish_year"`
-			Key              string   `json:"key"`
-			CoverID          int      `json:"cover_id"`
-			PublishDate      []string `json:"publish_date"`
-		} `json:"works"`
-	}
+// GetRecommendedBooks fetches books in the common subject and returns the top three recent books published within the last two years.
+func GetRecommendedBooks(ctx context.Context, subject string) ([]models.Work, error) {
+    // Fetch books for the subject with context, enforcing English language
+    subjectURL := fmt.Sprintf("https://openlibrary.org/subjects/%s.json?limit=50&sort=new", strings.ReplaceAll(subject, " ", "_"))
+    req, err := http.NewRequestWithContext(ctx, "GET", subjectURL, nil)
+    if err != nil {
+        return nil, fmt.Errorf("Error creating request for subject '%s': %v", subject, err)
+    }
 
-	if err := json.Unmarshal(body, &subjectResult); err != nil {
-		return nil, fmt.Errorf("Error parsing books JSON for subject '%s': %v", subject, err)
-	}
+    // Perform the HTTP request
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        return nil, fmt.Errorf("Error fetching books for subject '%s': %v", subject, err)
+    }
+    defer resp.Body.Close()
 
-	// Filter books published in the last 2 years and not in the future
-	currentDate := time.Now()
-	twoYearsAgo := currentDate.AddDate(-2, 0, 0)
+    // Read the response body
+    body, err := ioutil.ReadAll(resp.Body)
+    if err != nil {
+        return nil, fmt.Errorf("Error reading books response for subject '%s': %v", subject, err)
+    }
 
-	var (
-		recentBooks    []models.Work
-		mu             sync.Mutex
-		wg             sync.WaitGroup
-		concurrency    = 3 // Limit the number of concurrent goroutines for fetching descriptions
-		sem            = make(chan struct{}, concurrency)
-		booksToProcess []struct {
-			Work struct {
-				Title            string   `json:"title"`
-				Authors          []struct {
-					Name string `json:"name"`
-					Key  string `json:"key"`
-				} `json:"authors"`
-				EditionCount     int      `json:"edition_count"`
-				FirstPublishYear int      `json:"first_publish_year"`
-				Key              string   `json:"key"`
-				CoverID          int      `json:"cover_id"`
-				PublishDate      []string `json:"publish_date"`
-			}
-		}
-	)
+    // Parse the JSON response
+    var subjectResult struct {
+        Works []struct {
+            Title            string `json:"title"`
+            Authors          []struct {
+                Name string `json:"name"`
+                Key  string `json:"key"`
+            } `json:"authors"`
+            EditionCount     int    `json:"edition_count"`
+            Key              string `json:"key"`
+            CoverID          int    `json:"cover_id"`
+            FirstPublishYear int    `json:"first_publish_year"`
+            PublishDate      string `json:"publish_date"` // Added PublishDate
+        } `json:"works"`
+    }
 
-	// Pre-filter works based on publication date
-	for _, work := range subjectResult.Works {
-		var publishDate time.Time
-		// Try to parse the most recent publish date
-		for _, dateStr := range work.PublishDate {
-			parsedDate, err := time.Parse("2006", dateStr)
-			if err != nil {
-				parsedDate, err = time.Parse("January 2, 2006", dateStr)
-			}
-			if err != nil {
-				parsedDate, err = time.Parse("2006-01-02", dateStr)
-			}
-			if err == nil {
-				if publishDate.IsZero() || parsedDate.After(publishDate) {
-					publishDate = parsedDate
-				}
-			}
-		}
+    if err := json.Unmarshal(body, &subjectResult); err != nil {
+        return nil, fmt.Errorf("Error parsing books JSON for subject '%s': %v", subject, err)
+    }
 
-		// If publishDate is zero, fall back to FirstPublishYear
-		if publishDate.IsZero() && work.FirstPublishYear != 0 {
-			publishDate = time.Date(work.FirstPublishYear, 1, 1, 0, 0, 0, 0, time.UTC)
-		}
+    // Define channels for jobs and results
+    jobs := make(chan bookJob, len(subjectResult.Works))
+    results := make(chan models.Work, len(subjectResult.Works))
+    errCh := make(chan error, len(subjectResult.Works))
 
-		if publishDate.IsZero() {
-			continue
-		}
+    // Define number of workers
+    numWorkers := 10
+    wg := sync.WaitGroup{}
 
-		// Exclude books published in the future
-		if publishDate.After(currentDate) {
-			continue
-		}
+    // Start worker goroutines
+    for w := 1; w <= numWorkers; w++ {
+        wg.Add(1)
+        go func(workerID int) {
+            defer wg.Done()
+            for job := range jobs {
+                // Fetch description
+                description := ""
+                workKey := strings.TrimPrefix(job.Key, "/works/")
+                descURL := fmt.Sprintf("https://openlibrary.org/works/%s.json", workKey)
 
-		// Include books published in the last 2 years
-		if publishDate.After(twoYearsAgo) || publishDate.Equal(twoYearsAgo) {
-			booksToProcess = append(booksToProcess, struct {
-				Work struct {
-					Title            string   `json:"title"`
-					Authors          []struct {
-						Name string `json:"name"`
-						Key  string `json:"key"`
-					} `json:"authors"`
-					EditionCount     int      `json:"edition_count"`
-					FirstPublishYear int      `json:"first_publish_year"`
-					Key              string   `json:"key"`
-					CoverID          int      `json:"cover_id"`
-					PublishDate      []string `json:"publish_date"`
-				}
-			}{Work: work})
-		}
-	}
+                // Create HTTP request with context
+                descReq, err := http.NewRequestWithContext(ctx, "GET", descURL, nil)
+                if err != nil {
+                    log.Printf("Worker %d: Error creating request for work '%s': %v", workerID, job.Title, err)
+                    errCh <- fmt.Errorf("Work '%s': %v", job.Title, err)
+                    continue
+                }
 
-	// Process each book to fetch its description concurrently
-	for _, book := range booksToProcess {
-		wg.Add(1)
-		sem <- struct{}{} // Acquire a semaphore slot
+                // Perform the HTTP request
+                descResp, err := http.DefaultClient.Do(descReq)
+                if err != nil {
+                    log.Printf("Worker %d: Error fetching description for work '%s': %v", workerID, job.Title, err)
+                    errCh <- fmt.Errorf("Work '%s': %v", job.Title, err)
+                    continue
+                }
 
-		book := book // Capture the current book
+                // Read and parse the description
+                func() {
+                    defer descResp.Body.Close()
 
-		go func() {
-			defer wg.Done()
-			defer func() { <-sem }() // Release the semaphore slot
+                    // Read the response body
+                    descBody, err := ioutil.ReadAll(descResp.Body)
+                    if err != nil {
+                        log.Printf("Worker %d: Error reading description for work '%s': %v", workerID, job.Title, err)
+                        errCh <- fmt.Errorf("Work '%s': %v", job.Title, err)
+                        return
+                    }
 
-			// Prepare authors list
-			var authors []string
-			for _, a := range book.Work.Authors {
-				authors = append(authors, a.Name)
-			}
+                    // Parse the JSON response
+                    var descResult struct {
+                        Description interface{} `json:"description"`
+                    }
+                    if err := json.Unmarshal(descBody, &descResult); err != nil {
+                        log.Printf("Worker %d: Error parsing description JSON for work '%s': %v", workerID, job.Title, err)
+                        errCh <- fmt.Errorf("Work '%s': %v", job.Title, err)
+                        return
+                    }
 
-			// Fetch description if available
-			description := ""
-			workKey := strings.TrimPrefix(book.Work.Key, "/works/")
-			descURL := fmt.Sprintf("https://openlibrary.org/works/%s.json", workKey)
-			descResp, err := http.Get(descURL)
-			if err != nil {
-				log.Printf("Error fetching description for work '%s': %v", book.Work.Title, err)
-			} else {
-				// Ensure the response body is closed promptly
-				descBody, err := ioutil.ReadAll(descResp.Body)
-				descResp.Body.Close()
-				if err != nil {
-					log.Printf("Error reading description for work '%s': %v", book.Work.Title, err)
-				} else {
-					var descResult struct {
-						Description interface{} `json:"description"`
-					}
-					if err := json.Unmarshal(descBody, &descResult); err != nil {
-						log.Printf("Error parsing description JSON for work '%s': %v", book.Work.Title, err)
-					} else {
-						switch v := descResult.Description.(type) {
-						case string:
-							description = v
-						case map[string]interface{}:
-							if val, ok := v["value"].(string); ok {
-								description = val
-							}
-						}
-					}
-				}
-			}
+                    // Extract description based on type
+                    switch v := descResult.Description.(type) {
+                    case string:
+                        description = v
+                    case map[string]interface{}:
+                        if val, ok := v["value"].(string); ok {
+                            description = val
+                        }
+                    }
+                }()
 
-			// Create the Work struct
-			recentBook := models.Work{
-				Title:            book.Work.Title,
-				Authors:          authors,
-				Description:      description,
-				FirstPublishYear: book.Work.FirstPublishYear,
-				PublishDate:      "", // Default to an empty string if no publish date exists
-			}
-			
-			// Only assign PublishDate if the slice is not empty
-			if len(book.Work.PublishDate) > 0 {
-				recentBook.PublishDate = book.Work.PublishDate[0] // Safely access the first publish date
-			}
-			
-			// Safely append to the recentBooks slice
-			mu.Lock()
-			recentBooks = append(recentBooks, recentBook)
-			mu.Unlock()
-		}()
-	}
+                // Create the Work struct
+                work := models.Work{
+                    Title:            job.Title,
+                    Authors:          job.Authors,
+                    Description:      nil, // Default to nil
+                    FirstPublishYear: job.FirstPublishYear,
+                }
 
-	// Wait for all goroutines to finish
-	wg.Wait()
+                if description != "" {
+                    work.Description = &description
+                }
 
-	if len(recentBooks) == 0 {
-		return nil, fmt.Errorf("No recent books found for subject '%s'.", subject)
-	}
+                // Send the work to the results channel
+                select {
+                case results <- work:
+                case <-ctx.Done():
+                    return
+                }
+            }
+        }(w)
+    }
 
-	// Sort the books by publication date in descending order
-	sort.Slice(recentBooks, func(i, j int) bool {
-		return recentBooks[i].FirstPublishYear > recentBooks[j].FirstPublishYear
-	})
+    // Enqueue jobs with added validation
+    currentYear := time.Now().Year()
+    for _, book := range subjectResult.Works {
+        // Parse the publish year from publish_date if available
+        publishYear := book.FirstPublishYear
+        if book.PublishDate != "" {
+            parsedYear := parseYear(book.PublishDate)
+            if parsedYear != 0 {
+                publishYear = parsedYear
+            }
+        }
 
-	// Select the top three books
-	if len(recentBooks) > 3 {
-		recentBooks = recentBooks[:3]
-	}
+        // Validation: Exclude books with future publish years
+        if publishYear == 0 || publishYear < currentYear-2 || publishYear > currentYear {
+            if publishYear > currentYear {
+                log.Printf("Excluded book '%s' with future publish year: %d", book.Title, publishYear)
+            }
+            continue // Skip this book
+        }
 
-	return recentBooks, nil
+        // Collect authors' names
+        var authors []string
+        for _, a := range book.Authors {
+            authors = append(authors, a.Name)
+        }
+
+        jobs <- bookJob{
+            Title:            book.Title,
+            Authors:          authors,
+            FirstPublishYear: book.FirstPublishYear,
+            PublishDate:      book.PublishDate,
+            Key:              book.Key,
+        }
+    }
+    close(jobs) // No more jobs
+
+    // Wait for all workers to finish
+    go func() {
+        wg.Wait()
+        close(results)
+        close(errCh)
+    }()
+
+    // Collect results
+    var recentBooks []models.Work
+    for work := range results {
+        recentBooks = append(recentBooks, work)
+    }
+
+    // Handle errors if necessary
+    for err := range errCh {
+        log.Printf("Error fetching book description: %v", err)
+    }
+
+    if len(recentBooks) == 0 {
+        return nil, fmt.Errorf("No recent books found for subject '%s'.", subject)
+    }
+
+    // Sort by FirstPublishYear descending (most recent first)
+    sort.Slice(recentBooks, func(i, j int) bool {
+        return recentBooks[i].FirstPublishYear > recentBooks[j].FirstPublishYear
+    })
+
+    // Select the top three books
+    if len(recentBooks) > 3 {
+        recentBooks = recentBooks[:3]
+    }
+
+    return recentBooks, nil
 }

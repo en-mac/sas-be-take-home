@@ -1,8 +1,9 @@
-// services/subject_service.go
+// internal/services/subject_service.go
 
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -17,42 +18,61 @@ import (
 
 // SubjectAuthorResult holds both aggregate subject counts and per-author subjects.
 type SubjectAuthorResult struct {
-	Aggregate   map[string]int              // Aggregate subject counts across all authors
-	PerAuthor   map[string][]string         // Subjects per individual author
+	Aggregate map[string]int      // Aggregate subject counts across all authors
+	PerAuthor map[string][]string // Subjects per individual author
 }
 
 // GetSubjectAuthorCounts retrieves subjects per author and counts how many authors have written in each subject concurrently.
-func GetSubjectAuthorCounts(authors []models.Author) (SubjectAuthorResult, error) {
+func GetSubjectAuthorCounts(ctx context.Context, authors []models.Author) (SubjectAuthorResult, error) {
 	subjectAuthorCount := make(map[string]int)
 	perAuthorSubjects := make(map[string][]string)
+
 	var (
 		wg          sync.WaitGroup
 		mu          sync.Mutex
-		concurrency = 10 // Limit the number of concurrent goroutines
+		concurrency = 20 // Limit the number of concurrent goroutines
 		sem         = make(chan struct{}, concurrency)
 	)
+
+	// Channel to collect errors from goroutines
+	errCh := make(chan error, len(authors))
 
 	for _, author := range authors {
 		wg.Add(1)
 		sem <- struct{}{} // Acquire a semaphore slot
 
+		// Capture the current author to avoid closure issues
+		author := author
+
 		go func(author models.Author) {
 			defer wg.Done()
 			defer func() { <-sem }() // Release the semaphore slot
 
-			// Fetch works for the author
+			// Fetch works for the author with context
 			worksURL := fmt.Sprintf("https://openlibrary.org/authors/%s/works.json?limit=100", author.Key)
 
-			resp, err := http.Get(worksURL)
+			// Create HTTP request with context
+			req, err := http.NewRequestWithContext(ctx, "GET", worksURL, nil)
 			if err != nil {
-				log.Printf("Error fetching works for author '%s': %v", author.Name, err)
+				log.Printf("Error creating request for author '%s': %v", author.Name, err)
+				errCh <- fmt.Errorf("Author '%s': %v", author.Name, err)
 				return
 			}
-			// Ensure the response body is closed promptly
+
+			// Perform the HTTP request
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				log.Printf("Error fetching works for author '%s': %v", author.Name, err)
+				errCh <- fmt.Errorf("Author '%s': %v", author.Name, err)
+				return
+			}
+			defer resp.Body.Close()
+
+			// Read the response body
 			body, err := ioutil.ReadAll(resp.Body)
-			resp.Body.Close()
 			if err != nil {
 				log.Printf("Error reading works response for author '%s': %v", author.Name, err)
+				errCh <- fmt.Errorf("Author '%s': %v", author.Name, err)
 				return
 			}
 
@@ -63,9 +83,9 @@ func GetSubjectAuthorCounts(authors []models.Author) (SubjectAuthorResult, error
 					Subjects []string `json:"subjects"`
 				} `json:"entries"`
 			}
-
 			if err := json.Unmarshal(body, &worksResult); err != nil {
 				log.Printf("Error parsing works JSON for author '%s': %v", author.Name, err)
+				errCh <- fmt.Errorf("Author '%s': %v", author.Name, err)
 				return
 			}
 
@@ -82,16 +102,26 @@ func GetSubjectAuthorCounts(authors []models.Author) (SubjectAuthorResult, error
 
 			// Safely update the maps
 			mu.Lock()
-			defer mu.Unlock()
 			for subject := range subjectsSet {
 				subjectAuthorCount[subject]++
 				perAuthorSubjects[author.Name] = append(perAuthorSubjects[author.Name], subject)
 			}
+			mu.Unlock()
 		}(author)
 	}
 
 	// Wait for all goroutines to finish
 	wg.Wait()
+	close(errCh)
+
+	// Check for errors
+	if len(errCh) > 0 {
+		errMessages := []string{}
+		for err := range errCh {
+			errMessages = append(errMessages, err.Error())
+		}
+		return SubjectAuthorResult{}, fmt.Errorf(strings.Join(errMessages, "; "))
+	}
 
 	return SubjectAuthorResult{
 		Aggregate: subjectAuthorCount,
@@ -99,37 +129,36 @@ func GetSubjectAuthorCounts(authors []models.Author) (SubjectAuthorResult, error
 	}, nil
 }
 
-
-
 // FindMostCommonSubject identifies common subjects between two users and selects the most prominent one.
 func FindMostCommonSubject(user1Subjects, user2Subjects map[string]int) (string, error) {
-	commonSubjects := make(map[string]int)
+    commonSubjects := make(map[string]int)
 
-	// Find common subjects and sum the number of authors
-	for subject, count1 := range user1Subjects {
-		if count2, exists := user2Subjects[subject]; exists {
-			commonSubjects[subject] = count1 + count2
-		}
-	}
+    // Find common subjects and sum the number of authors
+    for subject, count1 := range user1Subjects {
+        if count2, exists := user2Subjects[subject]; exists {
+            commonSubjects[subject] = count1 + count2
+        }
+    }
 
-	if len(commonSubjects) == 0 {
-		return "", fmt.Errorf("No common subjects found between the users")
-	}
+    if len(commonSubjects) == 0 {
+        return "", fmt.Errorf("No common subjects found between the users")
+    }
 
-	// Sort the common subjects by total author count in descending order
-	type subjectCount struct {
-		Subject string
-		Count   int
-	}
-	var subjectCounts []subjectCount
-	for subject, count := range commonSubjects {
-		subjectCounts = append(subjectCounts, subjectCount{Subject: subject, Count: count})
-	}
+    // Sort the common subjects by total author count in descending order
+    type subjectCount struct {
+        Subject string
+        Count   int
+    }
+    var subjectCounts []subjectCount
+    for subject, count := range commonSubjects {
+        subjectCounts = append(subjectCounts, subjectCount{Subject: subject, Count: count})
+    }
 
-	sort.Slice(subjectCounts, func(i, j int) bool {
-		return subjectCounts[i].Count > subjectCounts[j].Count
-	})
+    sort.Slice(subjectCounts, func(i, j int) bool {
+        return subjectCounts[i].Count > subjectCounts[j].Count
+    })
 
-	// Return the most prominent common subject
-	return subjectCounts[0].Subject, nil
+    // Return the most prominent common subject
+    return subjectCounts[0].Subject, nil
 }
+

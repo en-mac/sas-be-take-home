@@ -1,6 +1,9 @@
+// internal/services/author_service.go
+
 package services
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -9,24 +12,29 @@ import (
 	"strings"
 	"sync"
 
-    "be-takehome-2024/internal/models"
+	"be-takehome-2024/internal/models"
 )
 
 // ResolveAuthorKeys searches for authors and returns their Open Library keys concurrently.
-func ResolveAuthorKeys(authors []string) ([]models.Author, error) {
+func ResolveAuthorKeys(ctx context.Context, authors []string) ([]models.Author, error) {
 	var (
-		authorKeys   []models.Author
-		wg           sync.WaitGroup
-		mu           sync.Mutex
-		concurrency  = 10 // Limit the number of concurrent goroutines
-		sem          = make(chan struct{}, concurrency)
+		authorKeys []models.Author
+		mu         sync.Mutex
+		wg         sync.WaitGroup
 	)
+
+	// Define concurrency limit
+	concurrency := 20
+	sem := make(chan struct{}, concurrency)
+
+	// Channel to collect errors from goroutines
+	errCh := make(chan error, len(authors))
 
 	for _, authorName := range authors {
 		wg.Add(1)
 		sem <- struct{}{} // Acquire a semaphore slot
 
-		// Capture authorName to avoid issues with goroutine closure
+		// Capture authorName
 		authorName := authorName
 
 		go func() {
@@ -39,17 +47,28 @@ func ResolveAuthorKeys(authors []string) ([]models.Author, error) {
 			// Open Library Search API URL
 			searchURL := fmt.Sprintf("https://openlibrary.org/search/authors.json?q=%s", queryName)
 
-			// Make the API request
-			resp, err := http.Get(searchURL)
+			// Create HTTP request with context
+			req, err := http.NewRequestWithContext(ctx, "GET", searchURL, nil)
 			if err != nil {
-				log.Printf("Error fetching data for author '%s': %v", authorName, err)
+				log.Printf("Error creating request for author '%s': %v", authorName, err)
+				errCh <- fmt.Errorf("Author '%s': %v", authorName, err)
 				return
 			}
-			// Ensure the response body is closed promptly
+
+			// Perform the HTTP request
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				log.Printf("Error fetching data for author '%s': %v", authorName, err)
+				errCh <- fmt.Errorf("Author '%s': %v", authorName, err)
+				return
+			}
+			defer resp.Body.Close()
+
+			// Read the response body
 			body, err := ioutil.ReadAll(resp.Body)
-			resp.Body.Close()
 			if err != nil {
 				log.Printf("Error reading response for author '%s': %v", authorName, err)
+				errCh <- fmt.Errorf("Author '%s': %v", authorName, err)
 				return
 			}
 
@@ -63,12 +82,14 @@ func ResolveAuthorKeys(authors []string) ([]models.Author, error) {
 			}
 			if err := json.Unmarshal(body, &result); err != nil {
 				log.Printf("Error parsing JSON for author '%s': %v", authorName, err)
+				errCh <- fmt.Errorf("Author '%s': %v", authorName, err)
 				return
 			}
 
 			// No authors found
 			if len(result.Docs) == 0 {
 				log.Printf("No authors found for '%s'.", authorName)
+				errCh <- fmt.Errorf("No authors found for '%s'", authorName)
 				return
 			}
 
@@ -88,17 +109,26 @@ func ResolveAuthorKeys(authors []string) ([]models.Author, error) {
 				}
 			}
 
-			// Safely append to the authorKeys slice
+			// Append to the slice safely
 			mu.Lock()
 			authorKeys = append(authorKeys, selectedAuthor)
-			log.Printf("Author '%s' retrieved with WorkCount: %d", selectedAuthor.Name, selectedAuthor.WorkCount)
-
 			mu.Unlock()
+			log.Printf("Author '%s' retrieved with WorkCount: %d", selectedAuthor.Name, selectedAuthor.WorkCount)
 		}()
 	}
 
 	// Wait for all goroutines to finish
 	wg.Wait()
+	close(errCh)
+
+	// Check for errors
+	if len(errCh) > 0 {
+		errMessages := []string{}
+		for err := range errCh {
+			errMessages = append(errMessages, err.Error())
+		}
+		return nil, fmt.Errorf(strings.Join(errMessages, "; "))
+	}
 
 	return authorKeys, nil
 }

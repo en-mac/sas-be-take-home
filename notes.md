@@ -2,17 +2,14 @@
 
 ## Assumptions/ Future Improvements:
 - Right now a user_id is just a number related to its position in the database. We could do it using username instead of user_id.
-- All logs are currently using standard "log" package and are streamed to backend-logs.db. In production, we may want to use structured logging so that we could easily search and filter logs like INFO, DEBUG, or ERROR. We could stream these logs to a log aggregator like ELK stack or AWS CloudWatch.
+- All logs are currently using standard "log" package and are streamed to logs.db. In production, we may want to use structured logging so that we could easily search and filter logs like INFO, DEBUG, or ERROR. We could stream these logs to a log aggregator like ELK stack or AWS CloudWatch.
 - Right now the setupDatabase function first deletes the database if it exists and then creates a new one. In production, we would likely have a database running persistently either in its own container or as a managed service. 
 
-- I am using English as the default language for the Open Library API for Authors and the Titles of their Works. 
-- I am using local caching to reduce time by eliminating duplicate API calls. I am using "go-cache" for this purpose. In production, we could use Redis for caching.
+- I need to use English as the default language for the Open Library API for Authors and the Titles of their Works. I do not see a way to change the language of the API response. Another option is importing something like the Google Translate API to translate the response to English. 
+- I need to use local caching to reduce time by eliminating duplicate API calls. I will be using "go-cache" for this purpose. In production, we could use Redis for caching.
 - Then we can see if we need to use machine learning to find a more accurate 'best recommendation' for the users.
 
-- maybe we need to return only books that contain a subject?
 
 # TODO:
-- stream logs to a new backend-logs.db file
-- resolve for english. then add support for other languages
-- implement local caching
+- stream logs to a new logs.db file- implement local caching
 - machine learning over subjects

@@ -1,130 +1,161 @@
-// handlers/recommendations.go
+// internal/handlers/recommendations.go
 
 package handlers
 
 import (
-	"database/sql"
-	"encoding/json"
-	"fmt"
-	"log"
-	"net/http"
-	"strconv"
+    "context"
+    "database/sql"
+    "encoding/json"
+    "fmt"
+    "log"
+    "net/http"
+    "strconv"
+    "time"
 
-	"be-takehome-2024/internal/database"
-	"be-takehome-2024/internal/services"
+    "be-takehome-2024/internal/database"
+    "be-takehome-2024/internal/services"
 )
 
 // RecommendationsHandler handles the /recommendations endpoint.
 func RecommendationsHandler(w http.ResponseWriter, r *http.Request) {
-	// Parse query parameters
-	user1IDStr := r.URL.Query().Get("user1")
-	user2IDStr := r.URL.Query().Get("user2")
+    // Set a timeout for the request context
+    ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+    defer cancel()
 
-	if user1IDStr == "" || user2IDStr == "" {
-		http.Error(w, "Both 'user1' and 'user2' query parameters are required.", http.StatusBadRequest)
-		return
-	}
+    // Parse query parameters
+    user1IDStr := r.URL.Query().Get("user1")
+    user2IDStr := r.URL.Query().Get("user2")
 
-	// Validate and convert user IDs
-	user1ID, err1 := strconv.Atoi(user1IDStr)
-	user2ID, err2 := strconv.Atoi(user2IDStr)
+    if user1IDStr == "" || user2IDStr == "" {
+        http.Error(w, "Both 'user1' and 'user2' query parameters are required.", http.StatusBadRequest)
+        return
+    }
 
-	if err1 != nil || err2 != nil {
-		http.Error(w, "User IDs must be valid integers.", http.StatusBadRequest)
-		return
-	}
+    // Validate and convert user IDs
+    user1ID, err1 := strconv.Atoi(user1IDStr)
+    user2ID, err2 := strconv.Atoi(user2IDStr)
 
-	// Open the database
-	db, err := sql.Open("sqlite3", "./user.db")
-	if err != nil {
-		http.Error(w, "Database connection error.", http.StatusInternalServerError)
-		return
-	}
-	defer db.Close()
+    if err1 != nil || err2 != nil {
+        http.Error(w, "User IDs must be valid integers.", http.StatusBadRequest)
+        return
+    }
 
-	// Fetch favorite authors for each user
-	user1Authors, err := database.GetUserFavoriteAuthors(db, user1ID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if len(user1Authors) == 0 {
-		http.Error(w, fmt.Sprintf("No favorite authors found for user ID %d.", user1ID), http.StatusNotFound)
-		return
-	}
+    // Open the database
+    db, err := sql.Open("sqlite3", "./user.db")
+    if err != nil {
+        http.Error(w, "Database connection error.", http.StatusInternalServerError)
+        return
+    }
+    defer db.Close()
 
-	user2Authors, err := database.GetUserFavoriteAuthors(db, user2ID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	if len(user2Authors) == 0 {
-		http.Error(w, fmt.Sprintf("No favorite authors found for user ID %d.", user2ID), http.StatusNotFound)
-		return
-	}
+    // Channels to collect subjects and errors
+    type subjectResult struct {
+        Aggregate map[string]int
+        Err       error
+    }
+    resultsCh := make(chan subjectResult, 2)
 
-	// Resolve author names to author keys
-	user1AuthorKeys, err := services.ResolveAuthorKeys(user1Authors)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+    // Fetch subjects for both users concurrently
+    go func() {
+        // Fetch favorite authors for user1
+        user1Authors, err := database.GetUserFavoriteAuthors(db, user1ID)
+        if err != nil {
+            resultsCh <- subjectResult{nil, fmt.Errorf("User1: %v", err)}
+            return
+        }
+        if len(user1Authors) == 0 {
+            resultsCh <- subjectResult{nil, fmt.Errorf("No favorite authors found for user ID %d.", user1ID)}
+            return
+        }
 
-	user2AuthorKeys, err := services.ResolveAuthorKeys(user2Authors)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+        // Resolve author keys for user1
+        user1AuthorKeys, err := services.ResolveAuthorKeys(ctx, user1Authors)
+        if err != nil {
+            resultsCh <- subjectResult{nil, fmt.Errorf("User1: %v", err)}
+            return
+        }
 
-	// Retrieve subjects per author for each user
-	user1SubjectResult, err := services.GetSubjectAuthorCounts(user1AuthorKeys)
-	if err != nil {
-		http.Error(w, "Error fetching subjects for user 1.", http.StatusInternalServerError)
-		return
-	}
+        // Get subject counts for user1
+        user1SubjectResult, err := services.GetSubjectAuthorCounts(ctx, user1AuthorKeys)
+        if err != nil {
+            resultsCh <- subjectResult{nil, fmt.Errorf("User1: %v", err)}
+            return
+        }
 
-	user2SubjectResult, err := services.GetSubjectAuthorCounts(user2AuthorKeys)
-	if err != nil {
-		http.Error(w, "Error fetching subjects for user 2.", http.StatusInternalServerError)
-		return
-	}
+        resultsCh <- subjectResult{user1SubjectResult.Aggregate, nil}
+    }()
 
-	// Log per-author subjects for User 1
-	for author, subjects := range user1SubjectResult.PerAuthor {
-		log.Printf("User 1, Author: %s, subjects: %v", author, subjects)
-	}
+    go func() {
+        // Fetch favorite authors for user2
+        user2Authors, err := database.GetUserFavoriteAuthors(db, user2ID)
+        if err != nil {
+            resultsCh <- subjectResult{nil, fmt.Errorf("User2: %v", err)}
+            return
+        }
+        if len(user2Authors) == 0 {
+            resultsCh <- subjectResult{nil, fmt.Errorf("No favorite authors found for user ID %d.", user2ID)}
+            return
+        }
 
-	// Log per-author subjects for User 2
-	for author, subjects := range user2SubjectResult.PerAuthor {
-		log.Printf("User 2, Author: %s, subjects: %v", author, subjects)
-	}
+        // Resolve author keys for user2
+        user2AuthorKeys, err := services.ResolveAuthorKeys(ctx, user2Authors)
+        if err != nil {
+            resultsCh <- subjectResult{nil, fmt.Errorf("User2: %v", err)}
+            return
+        }
 
-	// Optional: Log aggregate subjects if needed
-	// log.Printf("User 1 aggregate subjects: %v", user1SubjectResult.Aggregate)
-	// log.Printf("User 2 aggregate subjects: %v", user2SubjectResult.Aggregate)
+        // Get subject counts for user2
+        user2SubjectResult, err := services.GetSubjectAuthorCounts(ctx, user2AuthorKeys)
+        if err != nil {
+            resultsCh <- subjectResult{nil, fmt.Errorf("User2: %v", err)}
+            return
+        }
 
-	// Identify common subjects and select the most prominent one
-	commonSubject, err := services.FindMostCommonSubject(user1SubjectResult.Aggregate, user2SubjectResult.Aggregate)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	}
-	log.Printf("Common subject: %s", commonSubject)
+        resultsCh <- subjectResult{user2SubjectResult.Aggregate, nil}
+    }()
 
-	// Fetch books in the common subject
-	recommendedBooks, err := services.GetRecommendedBooks(commonSubject)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+    // Collect results
+    var user1Subjects, user2Subjects map[string]int
+    for i := 0; i < 2; i++ {
+        select {
+        case res := <-resultsCh:
+            if res.Err != nil {
+                http.Error(w, res.Err.Error(), http.StatusInternalServerError)
+                return
+            }
+            if user1Subjects == nil {
+                user1Subjects = res.Aggregate
+            } else {
+                user2Subjects = res.Aggregate
+            }
+        case <-ctx.Done():
+            http.Error(w, "Request timed out.", http.StatusGatewayTimeout)
+            return
+        }
+    }
 
-	// Prepare the response
-	response := map[string]interface{}{
-		// "common_subject":  commonSubject,
-		"recommendations": recommendedBooks,
-	}
+    // Find the most common subject
+    commonSubject, err := services.FindMostCommonSubject(user1Subjects, user2Subjects)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusNotFound)
+        return
+    }
+    log.Printf("Common subject: %s", commonSubject)
 
-	// Send the JSON response
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+    // Fetch recommended books
+    recommendedBooks, err := services.GetRecommendedBooks(ctx, commonSubject)
+    if err != nil {
+        http.Error(w, err.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    // Prepare the response
+    response := map[string]interface{}{
+        "common_subject":  commonSubject,
+        "recommendations": recommendedBooks,
+    }
+
+    // Send the JSON response
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(response)
 }
