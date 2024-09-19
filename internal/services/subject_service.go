@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"sort"
 
 	"be-takehome-2024/internal/models"
 )
@@ -133,35 +132,25 @@ func GetSubjectAuthorCounts(ctx context.Context, authors []models.Author) (Subje
 	}, nil
 }
 
-// FindMostCommonSubject identifies common subjects between two users and selects the most prominent one.
 func FindMostCommonSubject(user1Subjects, user2Subjects map[string]int) (string, error) {
-	commonSubjects := make(map[string]int)
+    var (
+        mostCommonSubject string
+        highestCount      int
+    )
 
-	// Find common subjects and sum the number of authors
-	for subject, count1 := range user1Subjects {
-		if count2, exists := user2Subjects[subject]; exists {
-			commonSubjects[subject] = count1 + count2
-		}
-	}
+    for subject, count1 := range user1Subjects {
+        if count2, exists := user2Subjects[subject]; exists {
+            totalCount := count1 + count2
+            if totalCount > highestCount {
+                highestCount = totalCount
+                mostCommonSubject = subject
+            }
+        }
+    }
 
-	if len(commonSubjects) == 0 {
-		return "", fmt.Errorf("No common subjects found between the users")
-	}
+    if mostCommonSubject == "" {
+        return "", fmt.Errorf("No common subjects found between the users")
+    }
 
-	// Sort the common subjects by total author count in descending order
-	type subjectCount struct {
-		Subject string
-		Count   int
-	}
-	var subjectCounts []subjectCount
-	for subject, count := range commonSubjects {
-		subjectCounts = append(subjectCounts, subjectCount{Subject: subject, Count: count})
-	}
-
-	sort.Slice(subjectCounts, func(i, j int) bool {
-		return subjectCounts[i].Count > subjectCounts[j].Count
-	})
-
-	// Return the most prominent common subject
-	return subjectCounts[0].Subject, nil
+    return mostCommonSubject, nil
 }
