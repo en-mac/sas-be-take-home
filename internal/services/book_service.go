@@ -10,7 +10,7 @@ import (
     "log"
     "net/http"
     "regexp"
-    "sort"
+    // "sort"
     "strconv"
     "strings"
     "sync"
@@ -213,10 +213,10 @@ func GetRecommendedBooks(ctx context.Context, subject string) ([]models.Work, er
         return nil, fmt.Errorf("No recent books found for subject '%s'.", subject)
     }
 
-    // Sort by the most recent edition's publish year in descending order
-    sort.Slice(recentBooks, func(i, j int) bool {
-        return recentBooks[i].FirstPublishYear > recentBooks[j].FirstPublishYear
-    })
+    // // Sort by the most recent edition's publish year in descending order
+    // sort.Slice(recentBooks, func(i, j int) bool {
+    //     return recentBooks[i].FirstPublishYear > recentBooks[j].FirstPublishYear
+    // })
 
     // Select the top three books
     if len(recentBooks) > 3 {

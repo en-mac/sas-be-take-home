@@ -99,17 +99,17 @@ func GetSubjectAuthorCounts(ctx context.Context, authors []models.Author) (Subje
 				// Log the author's name and the work number
 				log.Printf("Author: %s, Work %d: %s", author.Name, i+1, work.Title)
 
-				// Check if the work has already been processed
-				mu.Lock()
-				if _, exists := processedWorks[work.Key]; exists {
-					// Work already processed, skip to avoid duplicates
-					mu.Unlock()
-					log.Printf("Skipping duplicate work '%s' for author '%s'", work.Title, author.Name)
-					continue
-				}
-				// Mark the work as processed
-				processedWorks[work.Key] = struct{}{}
-				mu.Unlock()
+				// // Check if the work has already been processed
+				// mu.Lock()
+				// if _, exists := processedWorks[work.Key]; exists {
+				// 	// Work already processed, skip to avoid duplicates
+				// 	mu.Unlock()
+				// 	log.Printf("Skipping duplicate work '%s' for author '%s'", work.Title, author.Name)
+				// 	continue
+				// }
+				// // Mark the work as processed
+				// processedWorks[work.Key] = struct{}{}
+				// mu.Unlock()
 
 				for _, subject := range work.Subjects {
 					normalizedSubject := strings.ToLower(strings.TrimSpace(subject))
