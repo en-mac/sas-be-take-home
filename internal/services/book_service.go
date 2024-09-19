@@ -10,11 +10,10 @@ import (
     "log"
     "net/http"
     "regexp"
-    // "sort"
     "strconv"
     "strings"
     "sync"
-    "time"
+    // "time"
 
     "be-takehome-2024/internal/models"
 )
@@ -82,7 +81,7 @@ func GetRecommendedBooks(ctx context.Context, subject string) ([]models.Work, er
         wg          sync.WaitGroup
         concurrency = 6 // Limit the number of concurrent goroutines
         sem         = make(chan struct{}, concurrency)
-        currentYear = time.Now().Year()
+        // currentYear = time.Now().Year()
     )
 
     for _, work := range subjectResult.Works {
@@ -133,21 +132,21 @@ func GetRecommendedBooks(ctx context.Context, subject string) ([]models.Work, er
             }
 
             // Check if any edition was published within the last two years
-            stillInPrint := false
-            mostRecentYear := 0
-            for _, edition := range editionsResult.Entries {
-                year := parseYear(edition.PublishDate)
-                if year >= currentYear-2 && year <= currentYear {
-                    stillInPrint = true
-                    if year > mostRecentYear {
-                        mostRecentYear = year
-                    }
-                }
-            }
+            // stillInPrint := false
+            // mostRecentYear := 0
+            // for _, edition := range editionsResult.Entries {
+            //     year := parseYear(edition.PublishDate)
+            //     if year >= currentYear-2 && year <= currentYear {
+            //         stillInPrint = true
+            //         if year > mostRecentYear {
+            //             mostRecentYear = year
+            //         }
+            //     }
+            // }
 
-            if !stillInPrint {
-                return // Skip this work
-            }
+            // if !stillInPrint {
+            //     return // Skip this work
+            // }
 
             // Fetch description
             var description *string
@@ -196,7 +195,7 @@ func GetRecommendedBooks(ctx context.Context, subject string) ([]models.Work, er
                 Title:            work.Title,
                 Authors:          authors,
                 Description:      description,
-                FirstPublishYear: mostRecentYear,
+                // FirstPublishYear: mostRecentYear,
             }
 
             // Safely append to the recentBooks slice
@@ -212,11 +211,6 @@ func GetRecommendedBooks(ctx context.Context, subject string) ([]models.Work, er
     if len(recentBooks) == 0 {
         return nil, fmt.Errorf("No recent books found for subject '%s'.", subject)
     }
-
-    // // Sort by the most recent edition's publish year in descending order
-    // sort.Slice(recentBooks, func(i, j int) bool {
-    //     return recentBooks[i].FirstPublishYear > recentBooks[j].FirstPublishYear
-    // })
 
     // Select the top three books
     if len(recentBooks) > 3 {
