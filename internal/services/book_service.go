@@ -5,9 +5,10 @@ import (
     "encoding/json"
     "fmt"
     "io/ioutil"
+    "log"
     "net/http"
     "strings"
-
+    "time"
     "be-takehome-2024/internal/models"
 )
 
@@ -34,12 +35,12 @@ func GetRecommendedBooks(ctx context.Context, subject string) ([]models.Work, er
 
     var subjectResult struct {
         Works []struct {
-            Title   string `json:"title"`
-            Authors []struct {
+            Title          string `json:"title"`
+            Authors        []struct {
                 Name string `json:"name"`
-                Key  string `json:"key"`
             } `json:"authors"`
-            Key string `json:"key"`
+            Key            string `json:"key"`
+            FirstPublishYear int   `json:"first_publish_year"` // Ensure this field is returned by API
         } `json:"works"`
     }
 
@@ -48,38 +49,47 @@ func GetRecommendedBooks(ctx context.Context, subject string) ([]models.Work, er
     }
 
     var recentBooks []models.Work
+    currentYear := time.Now().Year()
+    cutoffYear := currentYear - 2
 
     for _, work := range subjectResult.Works {
-        if len(recentBooks) >= 3 {
-            break
-        }
+        // Only include books published in the last two years and exclude future years
+        if work.FirstPublishYear >= cutoffYear && work.FirstPublishYear <= currentYear {
+            if len(recentBooks) >= 3 {
+                break
+            }
 
-        workKey := strings.TrimPrefix(work.Key, "/works/")
-        description, err := fetchDescription(ctx, workKey)
-        if err != nil {
-            continue // Skip this book if we can't fetch the description
-        }
+            workKey := strings.TrimPrefix(work.Key, "/works/")
+            description, err := fetchDescription(ctx, workKey)
+            if err != nil {
+                continue // Skip this book if we can't fetch the description
+            }
 
-        var authors []string
-        for _, a := range work.Authors {
-            authors = append(authors, a.Name)
-        }
+            var authors []string
+            for _, a := range work.Authors {
+                authors = append(authors, a.Name)
+            }
 
-        recentWork := models.Work{
-            Title:       work.Title,
-            Authors:     authors,
-            Description: description,
-        }
+            // Log the book's title, authors, and publish year
+            log.Printf("Chosen Book: %s, Authors: %v, Published Year: %d", work.Title, authors, work.FirstPublishYear)
 
-        recentBooks = append(recentBooks, recentWork)
+            recentWork := models.Work{
+                Title:       work.Title,
+                Authors:     authors,
+                Description: description,
+            }
+
+            recentBooks = append(recentBooks, recentWork)
+        }
     }
 
     if len(recentBooks) == 0 {
-        return nil, fmt.Errorf("no books found for subject '%s'", subject)
+        return nil, fmt.Errorf("no books found for subject '%s' published in the last two years", subject)
     }
 
     return recentBooks, nil
 }
+
 
 func fetchDescription(ctx context.Context, workKey string) (*string, error) {
     descURL := fmt.Sprintf("https://openlibrary.org/works/%s.json", workKey)
