@@ -62,6 +62,14 @@ func ResolveAuthorKeys(ctx context.Context, authors []string) ([]models.Author, 
 			}
 			defer resp.Body.Close()
 
+			// Check the status code
+			if resp.StatusCode != http.StatusOK {
+				bodySnippet, _ := ioutil.ReadAll(resp.Body)
+				log.Printf("Non-OK HTTP status for author '%s': %s - %s", authorName, resp.Status, string(bodySnippet))
+				errCh <- fmt.Errorf("Author '%s': received status %s", authorName, resp.Status)
+				return
+			}
+
 			// Read the response body
 			body, err := ioutil.ReadAll(resp.Body)
 			if err != nil {

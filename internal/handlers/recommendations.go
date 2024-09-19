@@ -66,7 +66,7 @@ func RecommendationsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	
-		log.Printf("User1 authors: %v", user1Authors)
+		// log.Printf("User1 authors: %v", user1Authors)
 	
 		// Resolve author keys for user1
 		user1AuthorKeys, err := services.ResolveAuthorKeys(ctx, user1Authors)
@@ -101,7 +101,7 @@ func RecommendationsHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	
-		log.Printf("User2 authors: %v", user2Authors)
+		// log.Printf("User2 authors: %v", user2Authors)
 	
 		// Resolve author keys for user2
 		user2AuthorKeys, err := services.ResolveAuthorKeys(ctx, user2Authors)
