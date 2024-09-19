@@ -36,15 +36,10 @@ func SetupDatabase() {
 	statement.Exec("Sandra", "Andy Weir; Brandon Sanderson; Arthur C. Clarke; Ursula K. Le Guin; H.G. Wells")
 	statement.Exec("JDoe", "George R. R. Martin; Robert Jordan; Neil Gaiman; Robin Hobb; Steven Erikson")
 	statement.Exec("NonFicFan3", "Patrick Radden Keefe; Jon Krakauer; David Grann; Charles Montgomery; Jeff Speck")
-	statement.Exec("en-mac", "Herman Hesse; Fyodor Dostoevsky; Kurt Vonnegut; Philip K. Dick; Ernest Hemmingway")
-	statement.Exec("triplemac", "Sarah J. Maas; Kevin Kwan; Deborah Harkness; Mitch Albom")
-	// user 6 and on
-	// statement.Exec("FictionFan123", "J.K. Rowling; Stephen King; Margaret Atwood; Octavia E. Butler; Jane Austen")
-	// statement.Exec("EuropeanLiteratureLover", "Fyodor Dostoevsky; Leo Tolstoy; Franz Kafka; Albert Camus; Marcel Proust")
-	// statement.Exec("EdgeCase1", "Andy Weir; Brandon Sanderson; Arthur C. Clarke; Ursula K. Le Guin")
-	// statement.Exec("EdgeCase2", "Andy Weir; Brandon Sanderson; Arthur C. Clarke")
-	// statement.Exec("EdgeCase3", "Andy Weir")
-	// statement.Exec("EdgeCase4", "")
+	statement.Exec("test1", "Herman Hesse; Fyodor Dostoevsky; Kurt Vonnegut; Philip K. Dick; Ernest Hemmingway")
+	statement.Exec("test2", "Sarah J. Maas; Kevin Kwan; Deborah Harkness; Mitch Albom")
+	statement.Exec("EdgeCase1", "Silver Surfer")
+	statement.Exec("EdgeCase2", "Andy Weir")
 }
 
 // GetUserFavoriteAuthors retrieves up to five favorite authors for a given user ID.
