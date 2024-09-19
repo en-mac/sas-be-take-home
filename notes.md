@@ -1,14 +1,13 @@
 # Notes
 
-## Assumptions/ Future Improvements:
-- Right now a user_id is just a number related to its position in the database. We could do it using username instead of user_id.
-- All logs are currently using standard "log" package and are streamed to logs.db. In production, we may want to use structured logging so that we could easily search and filter logs like INFO, DEBUG, or ERROR. We could stream these logs to a log aggregator like ELK stack or AWS CloudWatch.
-- Right now the setupDatabase function first deletes the database if it exists and then creates a new one. In production, we would likely have a database running persistently either in its own container or as a managed service. 
+## Thoughts/ Future Improvements:
+- Right now a user_id is just a number related to its position in the database. The username could be used instead of user_id.
 
-- I need to use local caching to reduce time by eliminating duplicate API calls. I will be using "go-cache" for this purpose. In production, we could use Redis for caching.
-- Then we can see if we need to use machine learning to find a more accurate 'best recommendation' for the users.
+- All logs are currently using standard "log" package. In production, structured logging should be implemented so that we could easily search and filter logs like INFO, DEBUG, or ERROR. The logs could be streamed to a log aggregator like ELK stack or AWS CloudWatch.
 
+- The setupDatabase function first deletes the database if it exists and then creates a new one. In production, there would likely be a database running persistently either in its own container or as a managed service. 
 
-# TODO:
-- stream logs to a new logs.db file- implement local caching
-- machine learning over subjects
+- Local caching via "go-cache" could be used to reduce time by eliminating duplicate API calls. In production, we could use Redis for caching.
+
+- NLP could be used to ensure the responses only contain books in the language of the user.
+
